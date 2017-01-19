@@ -1,5 +1,6 @@
 Lua Iteration Library
 ========================
+[![Build Status](https://travis-ci.org/starwing/luaiter.svg?branch=master)](https://travis-ci.org/starwing/luaiter)
 
 luaiter is a rewritten version of [luafun][1]: a high-performance
 functional programming library for Lua designed with LuaJIT's trace
