@@ -142,8 +142,8 @@ Transforms:
 Compositions:
   - `zip(iters...)`
   - `interleave(iters...)`
-  - `cycle(iters...)`
   - `chain(iters...)`
+  - `cycle(iter)`
 
 Filtering:
   - `takewhile(func, iter)`

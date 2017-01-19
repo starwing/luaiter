@@ -83,7 +83,7 @@ end
 
 local function wrapiters(self, ...)
    local n = select('#', ...)
-   if n == 0 then return none_iter end
+   if n == 0 then return wrap(none_iter) end
    if n >= 3 then
       local last = select(n - 2, ...)
       if type(last) == 'table' and getmetatable(last) == Iter
@@ -375,15 +375,15 @@ local function flatmap(func, ...)
    return unwrap(self)
 end
 
-local function scan_call(state, init, ...)
-   state.curr = init
-   return init, ...
+local function scan_call(state, res, ...)
+   state.curr = res
+   return res, ...
 end
 
 local function scan_collect(state, key, ...)
    if key == nil then return end
    state[4] = key
-   return scan_call(state, state.func(state.curr or state.first, key, ...))
+   return scan_call(state, state.func(state.curr, key, ...))
 end
 
 local function scan_iter(state, key)
@@ -567,32 +567,15 @@ local function interleave(...)
    return wrapiters(wrap(interleave_iter), ...)
 end
 
-local function cycle_collect(state, key, ...)
-   state[4] = key
-   if key ~= nil then return key, ... end
-   return cycle_collect(state, calliter(state))
-end
-
-local function cycle_iter(state, key)
-   if key == nil then state[4] = nil end
-   return cycle_collect(state, calliter(state))
-end
-
-local function cycle(...)
-   local self = wrap(cycle_iter)
-   self[1], self[2], self[3] = ...
-   return unwrap(self)
-end
-
 local function chain_collect(state, c, key, ...)
    if key == nil then
       c = c + 4
       state.i = c
       if c > state.c then return end
-      local citer, cstate, ckey = state[c], state[c+1], state[c+3] or state[c+2]
+      local citer, cstate, cinit = state[c], state[c+1], state[c+2]
       return chain_collect(state, c, citer(cstate, cinit))
    end
-   state[c+2] = key
+   state[c+3] = key
    return key, ...
 end
 
@@ -603,21 +586,41 @@ local function chain_iter(state, key)
          state[i+3] = nil
       end
    end
-   local c = state.i or 1
+   local c = state.i
    local citer, cstate, ckey = state[c], state[c+1], state[c+3] or state[c+2]
    return chain_collect(state, c, citer(cstate, ckey))
 end
 
 local function chain(...)
-   local self = wrap(chain_iter)
+   return wrapiters(wrap(chain_iter), ...)
+end
+
+local function cycle_collect(state, key, ...)
+   state[4] = key
+   if key == nil then
+      return cycle_collect(state, calliter(state))
+   end
+   return key, ...
+end
+
+local function cycle_iter(state, key)
+   if key == nil then
+      state[4] = nil
+      return iter_collect(state, calliter(state))
+   end
+   return cycle_collect(state, calliter(state))
+end
+
+local function cycle(...)
+   local self = wrap(cycle_iter)
    self[1], self[2], self[3] = ...
    return unwrap(self)
 end
 
 exportn(zip,        "zip")
 exportn(interleave, "interleave")
-export0(cycle,      "cycle")
 exportn(chain,      "chain")
+export0(cycle,      "cycle")
 
 
 -- filtering
