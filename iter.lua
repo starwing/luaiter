@@ -7,7 +7,7 @@ local iter = {
 
 local assert, error, ipairs, pairs, select, type, getmetatable, setmetatable =
       assert, error, ipairs, pairs, select, type, getmetatable, setmetatable
-local load   = load or loadstring
+local load   = loadstring or load
 local ceil   = math.ceil
 local floor  = math.floor
 local random = math.random

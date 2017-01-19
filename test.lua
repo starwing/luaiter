@@ -103,7 +103,7 @@ local function gen_test()
    return w()
 end
 
-assert((load or loadstring)(gen_test(), "@test.impl.lua"))(newDumper, eq)
+assert((loadstring or load)(gen_test(), "@test.impl.lua"))(newDumper, eq)
 
 os.exit(unit.LuaUnit.run(), true)
 
