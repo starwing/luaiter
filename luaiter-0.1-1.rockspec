@@ -22,5 +22,7 @@ build = {
    type = "builtin",
    modules = {
       iter = "iter.lua",
+      query = "query.lua",
    }
 }
+

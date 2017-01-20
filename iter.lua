@@ -5,16 +5,16 @@ local iter = {
 }
 
 
-local assert, error, ipairs, pairs, select, type, getmetatable, setmetatable =
-      assert, error, ipairs, pairs, select, type, getmetatable, setmetatable
-local load   = loadstring or load
+local assert, error, pairs, select, type, getmetatable, setmetatable =
+      assert, error, pairs, select, type, getmetatable, setmetatable
+local load   = _G.loadstring or load
+local unpack = _G.unpack     or table.unpack
 local ceil   = math.ceil
 local floor  = math.floor
 local random = math.random
 local tabcat = table.concat
 local sub    = string.sub
 local format = string.format
-local unpack = unpack or table.unpack
 local pack   = table.pack or
                function(...) return { n = select('#', ...), ... } end
 
@@ -25,7 +25,7 @@ local Iter = {}
 Iter.__name = "iterator"
 Iter.__index = Iter
 
-local function none_iter(state, key) end
+local function none_iter() end
 
 function Iter:__call(state, key)
    return self.iter(state or self.state, key or self.init)
@@ -138,7 +138,7 @@ local function range(first, last, step)
    return unwrap(iter)
 end
 
-local function rand_iter(state)  return random() end
+local function rand_iter()  return random() end
 local function rand2_iter(state) return random(state.first, state.last) end
 
 local function rand(first, last)
@@ -299,7 +299,7 @@ end
 local function drop_iter(state, key)
    local piter, pstate = state[1], state[2]
    if key == state.init then
-      for i = 1, state.first do
+      for _ = 1, state.first do
          key = piter(pstate, key)
          if key == nil then return end
       end
@@ -331,7 +331,7 @@ export2(slice, "slice")
 
 local function map_collect(state, key, ...)
    if key == nil then return end
-   state[4] = key 
+   state[4] = key
    return state.func(key, ...)
 end
 
@@ -351,7 +351,7 @@ local function flatmap_collect(state, key, ...)
    if key == nil then
       local citer, cstate, cinit = map_collect(state, calliter(state))
       if not citer then return end
-      state[4], state[5], state[6], state[7] = citer, cstate, cinit
+      state[4], state[5], state[6], state[7] = citer, cstate, cinit, nil
       return flatmap_collect(state, citer(cstate, cinit))
    end
    state[4] = key
@@ -387,7 +387,7 @@ local function scan_collect(state, key, ...)
 end
 
 local function scan_iter(state, key)
-   if key == nil then state.curr, state[4] = state.first end
+   if key == nil then state.curr, state[4] = state.first, nil end
    return scan_collect(state, calliter(state))
 end
 
@@ -437,7 +437,7 @@ local function group_collect(state, n, key, ...)
 end
 
 local function group_iter(state, key)
-   if key == nil then state.i, state[4] = 1 end
+   if key == nil then state.i, state[4] = 1, nil end
    if not state.i then return end
    return group_collect(state, 1, calliter(state))
 end
@@ -475,7 +475,7 @@ local function groupby_collect(state, n, key, ...)
 end
 
 local function groupby_iter(state, key)
-   if key == nil then state.i, state.stop, state[4] = 1 end
+   if key == nil then state.i, state.stop, state[4] = 1, false, nil end
    if state.stop then return end
    return groupby_collect(state, state.i, calliter(state))
 end
@@ -625,14 +625,14 @@ export0(cycle,      "cycle")
 
 -- filtering
 
-local function takewhile_collect(func, iter, state, key, ...)
+local function takewhile_collect(func, key, ...)
    if key == nil then return end
    if func(key, ...) then return key, ...  end
 end
 
 local function takewhile_iter(state, key)
    local func, piter, pstate = state.func, state[1], state[2]
-   return takewhile_collect(func, piter, pstate, piter(pstate, key))
+   return takewhile_collect(func, piter(pstate, key))
 end
 
 local function takewhile(func, iter, state, init)
@@ -832,7 +832,7 @@ local rawget, rawset = rawget, rawset
 local make_selector = function(t) return setmetatable(t, Selector) end
 
 local function gen(v, root)
-   if getmetatable(v) == Selector then return v:gen(root) end
+   if getmetatable(v) == Selector then return v.gen(root) end
    local t = type(v)
    if t == "nil" or t == "boolean" or t == "number" then
       return tostring(v)
@@ -847,12 +847,12 @@ end
 
 local function unary(op, a)
    return make_selector {
-      gen = function(self, root) return "("..op..gen(a, root)..")" end }
+      gen = function(root) return "("..op..gen(a, root)..")" end }
 end
 
 local function binary(op, a, b)
    return make_selector {
-      gen = function(self, root)
+      gen = function(root)
          return "("..gen(a, root)..op..gen(b, root)..")" end }
 end
 
@@ -877,7 +877,7 @@ function Selector.__unm(a)       return unary ('-',  a   ) end
 
 function Selector.__index(a, b)
    return make_selector {
-      gen = function(self, root)
+      gen = function(root)
          return format("(%s[%s])", gen(a, root), gen(b, root))
       end
    }
@@ -889,7 +889,7 @@ function Selector:__call(...)
       rawset(self, 'n',    0)
       rawset(self, 'max',  0)
       rawset(self, 'dots', false)
-      local expr = self:gen(self)
+      local expr = self.gen(self)
       local code = "return function(_, _"..range(self.max):concat ", _"
       if self.dots then code = code .. ", ..." end
       code = code .. ") return "..expr.."; end"
@@ -902,7 +902,7 @@ end
 local function call(...)
    local args = pack(...)
    return make_selector {
-      gen = function(self, root)
+      gen = function(root)
          for i = 1, args.n do
             args[i] = gen(args[i], root)
          end
@@ -922,7 +922,7 @@ local selectors = {
    end;
    dots = make_selector {
       eval = function(_, ...) return ... end;
-      gen = function(v, root)
+      gen = function(root)
          root.dots = true
          return "..."
       end;
@@ -939,7 +939,7 @@ local selectors = {
    lor   = function(a, b) return binary("or",  a, b) end;
    andor = function(a, b, c)
       return make_selector {
-         gen = function(self, root)
+         gen = function(root)
             return format("(%s and %s or %s)",
                           gen(a, root), gen(b, root), gen(c, root))
          end
@@ -951,7 +951,7 @@ for i = 1, 9 do
    local selector = make_selector {
       eval = assert(load("return function(_, _"..range(i):concat ", _"..
                          ") return _"..i.. " end", '_'..i))();
-      gen = function(v, root)
+      gen = function(root)
          if root.max < i then root.max = i end
          return '_'..i
       end;
@@ -962,7 +962,7 @@ end
 
 iter._ = setmetatable(selectors, {
    __newindex = Selector.__newindex;
-   __call = function(self, f)
+   __call = function(_, f)
       if type(f) == "string" then
          return assert(load("return function(_"..range(9):concat ", _"..
                             ") return "..f.."; end", f))()
@@ -1003,8 +1003,8 @@ local Operator = {
    -- String operators
    cat    = function(a, b) return a .. b end;
    concat = function(a, b) return a .. b end;
-   len    = function(a, b) return    # a end;
-   length = function(a, b) return    # a end;
+   len    = function(a)    return    # a end;
+   length = function(a)    return    # a end;
 
    -- Posfix operators
    index = function(a, b)   return a[b]   end;
@@ -1012,7 +1012,7 @@ local Operator = {
 
    -- logic operators
    landor = function(a, b, c) return a and b or c end;
-   land   = function(a, b, c) return a and b      end;
+   land   = function(a, b)    return a and b      end;
    lor    = function(a, b)    return a       or b end;
    lnot   = function(a)       return   not a      end;
 
@@ -1036,7 +1036,7 @@ end
 
 setmetatable(Operator, {
    __call = function(self, op)
-      local op = assert(self[op], "not such operator")
+      op = assert(self[op], "not such operator")
       return iter._(op)
    end
 })
