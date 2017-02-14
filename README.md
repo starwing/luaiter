@@ -7,6 +7,8 @@ functional programming library for Lua designed with LuaJIT's trace
 compiler in mind. luaiter focus plain Lua performance improve and
 follows the standard Lua iteration protocol.
 
+luaiter has the same [License][2] as Lua itself.
+
 Some improves:
   - avoid any memory allocation when iteration.
   - use standard iteration protocol.
@@ -16,6 +18,7 @@ Some improves:
     function support.
 
 [1]: https://github.com/rtsisyk/luafun
+[2]: https://www.lua.org/license.html
 
 
 The standard iteration protocol
