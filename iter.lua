@@ -351,7 +351,7 @@ local function flatmap_collect(state, key, ...)
    if key == nil then
       local citer, cstate, cinit = map_collect(state, calliter(state))
       if not citer then return end
-      state[4], state[5], state[6], state[7] = citer, cstate, cinit, nil
+      state[5], state[6], state[7] = citer, cstate, cinit
       return flatmap_collect(state, citer(cstate, cinit))
    end
    state[4] = key
@@ -363,9 +363,9 @@ local function flatmap_iter(state, key)
       state[4] = nil
       return flatmap_collect(state)
    end
-   local citer, cstate = state[4], state[5]
+   local citer, cstate = state[5], state[6]
    if not citer then return flatmap_collect(state) end
-   return flatmap_collect(state, citer(cstate, state[7]))
+   return flatmap_collect(state, citer(cstate, state[4]))
 end
 
 local function flatmap(func, ...)
