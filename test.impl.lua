@@ -591,14 +591,14 @@ f
 x
 --]]
 
-range():take(5):group(2):map(table.unpack):each(print)
+range():take(5):group(2):map(_G.unpack or table.unpack):each(print)
 --[[OUTPUT
 1,2
 3,4
 5
 --]]
 
-iter {1,2,2,3,3,4,5} :groupby(_"_2, _2"):map(table.unpack)
+iter {1,2,2,3,3,4,5} :groupby(_"_2, _2"):map(_G.unpack or table.unpack)
 :each(print)
 --[[OUTPUT
 1
@@ -608,7 +608,7 @@ iter {1,2,2,3,3,4,5} :groupby(_"_2, _2"):map(table.unpack)
 5
 --]]
 
-array {1,2,2,3,3,4,5} :packgroupby():flatmap(array):map(table.unpack)
+array {1,2,2,3,3,4,5} :packgroupby():flatmap(array):map(_G.unpack or table.unpack)
 :each(print)
 --[[OUTPUT
 1
