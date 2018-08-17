@@ -21,20 +21,22 @@ before_install:
   - pip install --user hererocks
   - hererocks env --$LUA -rlatest    # Use latest LuaRocks, install into 'env' directory.
   - source env/bin/activate          # Add directory with all installed binaries to PATH.
+  - luarocks install luacov
+  - luarocks install luacov-coveralls --server=https://rocks.moonscript.org/dev
   # - luarocks install busted
   # - pip install cpp-coveralls
   # - luarocks install Lua-cURL         --server=https://rocks.moonscript.org/dev
-  # - luarocks install luacov-coveralls --server=https://rocks.moonscript.org/dev
   # - luarocks install lunitx
 
 install:
   - luarocks make
 
 script: 
-  - lua test.lua
+  - lua -lluacov test.lua
   # - lunit.sh test.lua
 
-#after_success:
+after_success:
+  - luacov-coveralls -v -i iter.lua -i test.impl.lua
 #  - coveralls -b .. -r .. --dump c.report.json
 #  - luacov-coveralls -j c.report.json -v
 

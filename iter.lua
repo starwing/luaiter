@@ -1056,7 +1056,7 @@ end
 
 setmetatable(Operator, {
    __call = function(self, op)
-      return iter._(assert(self[op], "not such operator"))
+      return iter._(assert(self[op], "no such operator"))
    end
 })
 

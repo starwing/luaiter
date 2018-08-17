@@ -142,6 +142,10 @@ for _, a in iter(1, 2, 3, 4, 5, 6, 7) do print(a) end
 attempt to iterate a number value
 --]]
 
+op"--"
+--[[ERROR
+no such operator
+--]]
 
 --! each
 
@@ -403,6 +407,24 @@ print(all(_"_1 >= 10, _1 <= 20", take(20, rand(10, 20))))
 true
 --]]
 
+local f, r = split(5, range(10))
+f:each(print)
+print '---'
+r:each(print)
+--[[OUTPUT
+1
+2
+3
+4
+5
+---
+6
+7
+8
+9
+10
+--]]
+
 
 --iter.array   = array
 --iter.resolve = resolve
@@ -644,6 +666,14 @@ iter {1,2,2,3,3,4,5} :groupby(_"_2, _2"):map(_G.unpack or table.unpack)
 5
 --]]
 
+iter {1,2,2,3,3,4,5} :group(3):map(_G.unpack or table.unpack)
+:each(print)
+--[[OUTPUT
+1,1,2,2,3,2
+4,3,5,3,6,4
+7,5
+--]]
+
 array {1,2,2,3,3,4,5} :packgroupby():flatmap(array):map(_G.unpack or table.unpack)
 :each(print)
 --[[OUTPUT
@@ -672,6 +702,14 @@ zip(array{"a", "b", "c", "d"}, array{"one", "two", "three"}):each(print)
 a,one
 b,two
 c,three
+d,nil
+--]]
+
+zip(array{"a", "b", "c", "d"}, iter{"one", "two", "three"}):each(print)
+--[[OUTPUT
+a,1,one
+b,2,two
+c,3,three
 d,nil
 --]]
 
@@ -819,6 +857,35 @@ filter(_"_1 % 3 == 0", range(10)):each(print)
 9
 --]]
 
+filterout(_"_1 % 3 == 0", range(10)):each(print)
+--[[OUTPUT
+1
+2
+4
+5
+7
+8
+10
+--]]
+
+local f1,r1 = partition(_"_1 % 3 == 0", range(10))
+f1:each(print)
+print'---'
+r1:each(print)
+--[[OUTPUT
+3
+6
+9
+---
+1
+2
+4
+5
+7
+8
+10
+--]]
+
 filter(_"_1 % 3 == 0", range(0)):each(print)
 --[[OUTPUT
 --]]
@@ -880,8 +947,6 @@ Emma
 
 --! reducing
 
-eq(_.self(range(10)).reduce(op.add)(), 55)
-
 eq(range(10):map(-_1):reduce(_1+_2), -55)
 eq(foldl(_1 + _2, nil, range(5)), 15)
 eq(foldl(_1 + _2, 0, range(5)), 15)
@@ -923,6 +988,15 @@ eq(any(_1, array{false, false, false, true}), true)
 eq(any(_1, {}), false)
 
 --! operators
+
+eq(_.self(range(10)).reduce(op.add)(), 55)
+eq(_(_1.range)(10)(_G):reduce(op.add), 55)
+_(_3)(_2, _1.._2, _.dots)("world", "hello", print, "a", "b", "c")
+print(_.andor(_.le(_1, _2), _3, _4)(1, 2, "foo", "bar"))
+--[[OUTPUT
+hello,worldhello,a,b,c
+foo
+--]]
 
 eq(op, operator) -- an alias
 
