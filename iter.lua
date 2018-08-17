@@ -31,8 +31,8 @@ local pack   = table.pack or function(...) return { n = select('#', ...), ... } 
 -- A stateful iterator has its own modifiable internal state, the
 -- "self" table. It still can not change state in iteration, but it
 -- can modify it's "self" table.  A stateful iterator should implement
--- "next" callback, accept self table, state and current key to
--- generates next values, by read/write the self table.
+-- "next" callback, accept self table and state to generates next
+-- values, by read/write the self table.
 --
 -- Stateful iterator has a "reset" callback that will be called with
 -- one or two arguments.  If only one argument passed, it initlizes
@@ -62,7 +62,6 @@ Iter.__name  = "iterator"
 Iter.__index = Iter
 
 -- internal callback defaults
-function Iter:next(state, key) return self.iter(state, key) end
 function Iter:reset(other)
    if other then
       for i, base in ipairs(other) do self[i] = base:clone() end
@@ -72,15 +71,23 @@ function Iter:reset(other)
    return self
 end
 
-local function collect(self, key, ...)
+local function collect_current(self, key, ...)
    self.current = key
+   return key, ...
+end
+
+function Iter:next(state)
+   return collect_current(self, self.iter(state, self.current))
+end
+
+local function collect(self, key, ...)
    if key == nil then self.stopped = true end
    return key, ...
 end
 
 function Iter:__call()
    if self.stopped then return end
-   return collect(self, self:next(self.state, self.current))
+   return collect(self, self:next(self.state))
 end
 
 function Iter:rewind()
@@ -94,13 +101,11 @@ function Iter:rewind()
 end
 
 function Iter:clone()
-   local new = setmetatable({
-      state   = self.state,
-      init    = self.init,
-      current = self.current
-   }, Iter)
+   local new = setmetatable({ state = self.state }, Iter)
    if self.next == Iter.next then
-      new.iter = self.iter
+      new.iter    = self.iter
+      new.init    = self.init
+      new.current = self.current
    else
       new.next  = self.next
       new.reset = self.reset
@@ -115,8 +120,8 @@ local function new_stateless(func, state, init)
    return setmetatable(self, Iter)
 end
 
-local function new_stateful(reset, func, state, init)
-   local self = { reset = reset, next = func, state = state, init = init, current = init }
+local function new_stateful(reset, func, state)
+   local self = { reset = reset, next = func, state = state }
    if not state then self.state = self end
    return reset(setmetatable(self, Iter)) or self
 end
@@ -200,7 +205,7 @@ local function rand(first, last)
 end
 
 local function array_reset(self, other)
-   self.index = other and other.index or self.init
+   self.index = other and other.index or 0
 end
 
 local function array_next(self, state)
@@ -212,7 +217,7 @@ end
 
 local function array(t)
    assert(t, "table expected")
-   return new_stateful(array_reset, array_next, t, 0)
+   return new_stateful(array_reset, array_next, t)
 end
 
 local function resolve1_iter(state, key) if key == nil then return state end end
@@ -430,12 +435,17 @@ local function flatmap(func, base)
    return self
 end
 
+local function scan_reset(self, other)
+   Iter.reset(self, other)
+   self.current = other and other.current or nil
+end
+
 local function scan_collect(self, state, key, ...)
    if key == nil then return end
    if not self.current and not state.acc then
-      return state.func(key, self[1]())
+      return collect_current(self, state.func(key, self[1]()))
    end
-   return state.func(self.current or state.acc, key, ...)
+   return collect_current(self, state.func(self.current or state.acc, key, ...))
 end
 
 local function scan_next(self, state)
@@ -443,7 +453,7 @@ local function scan_next(self, state)
 end
 
 local function scan(func, init, base)
-   local self = new_stateful(Iter.reset, scan_next)
+   local self = new_stateful(scan_reset, scan_next)
    self.state.func = func or id
    self.state.acc  = init
    self[1] = base
