@@ -4,6 +4,11 @@ if ... == nil then return dofile './test.lua' end
 
 --! array
 
+resolve(1,2,3):each(print)
+--[[OUTPUT
+1,2,3
+--]]
+
 for v in array { 1,2,3 } do print(v) end
 --[[OUTPUT
 1
@@ -511,8 +516,39 @@ drop(2, ipairs {'a', 'b', 'c', 'd', 'e'}):each(print)
 5,e
 --]]
 
+take(_"_1 < 5", array { 1,2,3,4,5,6,7,8,9,10 }):each(print)
+--[[OUTPUT
+1
+2
+3
+4
+--]]
+
+drop(_"_1 < 5", array { 1,2,3,4,5,6,7,8,9,10 }):each(print)
+--[[OUTPUT
+5
+6
+7
+8
+9
+10
+--]]
+
 
 --! transforms
+
+scan(_1+_2, nil, range(10)):each(print)
+--[[OUTPUT
+3
+6
+10
+15
+21
+28
+36
+45
+55
+--]]
 
 fun = function(...) return 'map', ... end
 map(fun, range(0)):each(print)
@@ -622,6 +658,14 @@ array {1,2,2,3,3,4,5} :packgroupby():flatmap(array):map(_G.unpack or table.unpac
 
 
 --! compositions
+
+array{"a", "b", "c", "d"} :prefix(range()):each(print)
+--[[OUTPUT
+1,a
+2,b
+3,c
+4,d
+--]]
 
 zip(array{"a", "b", "c", "d"}, array{"one", "two", "three"}):each(print)
 --[[OUTPUT
@@ -836,10 +880,19 @@ Emma
 
 --! reducing
 
+eq(_.self(range(10)).reduce(op.add)(), 55)
+
+eq(range(10):map(-_1):reduce(_1+_2), -55)
+eq(foldl(_1 + _2, nil, range(5)), 15)
 eq(foldl(_1 + _2, 0, range(5)), 15)
 eq(foldl(op.add, 0, range(5)), 15)
 eq(foldl(_1+_2*_3, 0, zip(range(1, 5), array{4, 3, 2, 1, 0})), 20)
 eq(foldl, reduce)
+
+eq(range(10):count(), 10)
+
+eq(index(_"_1 > 5", range(10)), 6)
+eq(range(5):scan(_1+_2):collect(), {3, 6, 10, 15})
 
 eq(length{"a", "b", "c", "d", "e"}, 5)
 eq(length{}, 0)

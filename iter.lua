@@ -15,8 +15,7 @@ local random = math.random
 local tabcat = table.concat
 local sub    = string.sub
 local format = string.format
-local pack   = table.pack or
-               function(...) return { n = select('#', ...), ... } end
+local pack   = table.pack or function(...) return { n = select('#', ...), ... } end
 
 
 -- iterator creation
@@ -63,7 +62,6 @@ Iter.__name  = "iterator"
 Iter.__index = Iter
 
 -- internal callback defaults
-function Iter.iter() end
 function Iter:next(state, key) return self.iter(state, key) end
 function Iter:reset(other)
    if other then
@@ -76,19 +74,18 @@ end
 
 local function collect(self, key, ...)
    self.current = key
-   if self.current == nil then self.stopped = true end
+   if key == nil then self.stopped = true end
    return key, ...
 end
 
-function Iter:__call(state, key)
+function Iter:__call()
    if self.stopped then return end
-   state = state or self.state
-   return collect(self, self:next(state, key or self.current or self.init))
+   return collect(self, self:next(self.state, self.current))
 end
 
 function Iter:rewind()
    if self.stopped then
-      self.stopped, self.current = nil, nil
+      self.stopped, self.current = nil, self.init
       if self.next ~= Iter.next then
          return self:reset() or self
       end
@@ -113,17 +110,18 @@ function Iter:clone()
 end
 
 local function new_stateless(func, state, init)
-   local self = { iter = func, state = state, init = init }
+   local self = { iter = func, state = state, init = init, current = init }
    if not state then self.state = self end
    return setmetatable(self, Iter)
 end
 
 local function new_stateful(reset, func, state, init)
-   local self = { reset = reset, next = func, state = state, init = init }
+   local self = { reset = reset, next = func, state = state, init = init, current = init }
    if not state then self.state = self end
    return reset(setmetatable(self, Iter)) or self
 end
 
+local function nil_iter() end
 local function string_iter(state, key)
    key = (key or 0) + 1
    local ch = sub(state, key, key)
@@ -134,19 +132,14 @@ end
 local function newiter(v, state, init)
    local t = type(v)
    if t == "table" then
-      if getmetatable(v) ~= Iter then
-         return new_stateless(pairs(v))
-      elseif v.next == Iter.next and state then
-         return new_stateless(v, state, init)
-      else
-         return v:clone()
-      end
+      if getmetatable(v) == Iter then return v:clone() end
+      return new_stateless(pairs(v))
    elseif t == "function" then
       return new_stateless(v, state, init)
    elseif t == "string" then
       return new_stateless(string_iter, v, 0)
    elseif t == "nil" then
-      return new_stateless(Iter.iter)
+      return new_stateless(nil_iter)
    end
    error(format('attempt to iterate a %s value', t))
 end
@@ -351,10 +344,23 @@ local function takewhile(func, base)
    return self
 end
 
+local function dropwhile_collect(self, state, key, ...)
+   if key == nil then return end
+   if self.remain ~= true then
+      if state(key, ...) then return dropwhile_collect(self, state, self[1]()) end
+      self.remain = true
+   end
+   return key, ...
+end
+
+local function dropwhile_next(self, state)
+   return dropwhile_collect(self, state, self[1]())
+end
+
 local function dropwhile(func, base)
-   assert(func, "function expected")
-   func = function(...) return not func(...) end
-   return takewhile(func, base)
+   local self = new_stateful(takedrop_reset, dropwhile_next, func or id)
+   self[1] = base
+   return self
 end
 
 export1(taken,     "taken", "take_n", "takeN")
@@ -381,7 +387,7 @@ end, "split", "span", "splitAt", "split_at")
 -- transforms
 
 local function map_collect(func, key, ...)
-   if key then return func(key, ...) end
+   if key ~= nil then return func(key, ...) end
 end
 
 local function map_next(self, state)
@@ -426,6 +432,9 @@ end
 
 local function scan_collect(self, state, key, ...)
    if key == nil then return end
+   if not self.current and not state.acc then
+      return state.func(key, self[1]())
+   end
    return state.func(self.current or state.acc, key, ...)
 end
 
@@ -450,10 +459,8 @@ local function group_reset(self, other)
             collects[k] = v
          end
          self.collects = collects
-      else
-         self.collects = nil
       end
-      self.remain   = other.remain
+      self.remain = other.remain
    else
       self.collects = { n = 0 }
       self.remain   = self.state
@@ -664,6 +671,7 @@ end
 
 function Iter:prefix(...)
    local super = zip(...)
+   super.notskip = true
    super[#super+1] = self:clone()
    return super
 end
@@ -745,7 +753,7 @@ local function foldl(func, init, base)
    end
    local key
    while true do
-      key, init = foldl_collect(func, init, base()) 
+      key, init = foldl_collect(func, init, base())
       if key == nil then return init end
    end
 end
@@ -757,7 +765,7 @@ local function index_collect(func, base, i, key, ...)
 end
 
 local function index(func, base)
-   return index_collect(func or id, base(), 0, base())
+   return index_collect(func or id, base, 0, base())
 end
 
 local function tcollect_collect(t, key, ...)
@@ -891,7 +899,8 @@ function Selector:__call(...)
       rawset(self, 'max',  0)
       rawset(self, 'dots', false)
       local expr = self.gen(self)
-      local code = "return function(_, _"..range(self.max):concat ", _"
+      local code = "return function(_"
+      if self.max > 0 then code = code..", _"..range(self.max):concat ", _" end
       if self.dots then code = code .. ", ..." end
       code = code .. ") return "..expr.."; end"
       eval = assert(load(code, expr))()
@@ -1037,8 +1046,7 @@ end
 
 setmetatable(Operator, {
    __call = function(self, op)
-      op = assert(self[op], "not such operator")
-      return iter._(op)
+      return iter._(assert(self[op], "not such operator"))
    end
 })
 
