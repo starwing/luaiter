@@ -1,3 +1,4 @@
+-- luacheck: no global
 if ... == nil then return dofile './test.lua' end
 
 
@@ -17,20 +18,6 @@ for i, v in iter(iter(iter { 1,2,3 })) do print(i, v) end
 3,3
 --]]
 
-for v in wrap(wrap(array { 1,2,3 })) do print(v) end
---[[OUTPUT
-1
-2
-3
---]]
-
-for i, v in wrap(wrap(ipairs { 1,2,3 })) do print(i, v) end
---[[OUTPUT
-1,1
-2,2
-3,3
---]]
-
 for v in array{} do print(i, v) end
 --[[OUTPUT
 --]]
@@ -39,30 +26,22 @@ for i, v in iter(iter(array{})) do print(i, v) end
 --[[OUTPUT
 --]]
 
--- Test that ``wrap`` do nothing for wrapped iterators
-iter1, state1, init1 = iter({1, 2, 3}):unwrap()
-iter2, state2, init2 = wrap(iter1, state1, init1):unwrap()
-eq(iter1,  iter2)
-eq(state1, state2)
-eq(init1,  init2)
-
-
 --! map
 
-local t = {}
-for k, v in iter { a = 1, b = 2, c = 3} do t[#t + 1] = k end
-table.sort(t)
-for v in array(t) do print(v) end
+local t1 = {}
+for k, _ in iter { a = 1, b = 2, c = 3} do t1[#t1 + 1] = k end
+table.sort(t1)
+for v in array(t1) do print(v) end
 --[[OUTPUT
 a
 b
 c
 --]]
 
-local t = {}
-for k, v in iter(iter(iter { a = 1, b = 2, c = 3})) do t[#t + 1] = k end
-table.sort(t)
-for v in array(t) do print(v) end
+local t2 = {}
+for k, _ in iter(iter(iter { a = 1, b = 2, c = 3})) do t2[#t2 + 1] = k end
+table.sort(t2)
+for v in array(t2) do print(v) end
 --[[OUTPUT
 a
 b
@@ -80,25 +59,7 @@ for k, v in iter(iter(iter({}))) do print(k, v) end
 
 --! string
 
-for a in str "abcde" do print(a) end
---[[OUTPUT
-a
-b
-c
-d
-e
---]]
-
 for _, a in iter "abcde" do print(a) end
---[[OUTPUT
-a
-b
-c
-d
-e
---]]
-
-for a in iter(iter(str "abcde")) do print(a) end
 --[[OUTPUT
 a
 b
@@ -116,15 +77,7 @@ d
 e
 --]]
 
-for a in str "" do print(a) end
---[[OUTPUT
---]]
-
 for _, a in iter "" do print(a) end
---[[OUTPUT
---]]
-
-for a in iter(iter(str "")) do print(a) end
 --[[OUTPUT
 --]]
 
@@ -161,22 +114,25 @@ for a in iter(myrange(10)) do print(a) end
 
 --! invalid values
 
-for i, a in iter(nil) do print(a) end
---[[ERROR
-attempt to iterate a nil value
+for _, a in iter() do print(a) end
+--[[OUTPUT
 --]]
 
-for i, a in iter(false) do print(a) end
+for _, a in iter(nil) do print(a) end
+--[[OUTPUT
+--]]
+
+for _, a in iter(false) do print(a) end
 --[[ERROR
 attempt to iterate a boolean value
 --]]
 
-for i, a in iter(1) do print(a) end
+for _, a in iter(1) do print(a) end
 --[[ERROR
 attempt to iterate a number value
 --]]
 
-for i, a in iter(1, 2, 3, 4, 5, 6, 7) do print(a) end
+for _, a in iter(1, 2, 3, 4, 5, 6, 7) do print(a) end
 --[[ERROR
 attempt to iterate a number value
 --]]
@@ -347,8 +303,7 @@ range(1.2, 1.6, 0.1):each(print)
 
 -- Invalid step
 range(0, 5, 0):each(print)
---[[ERROR
-step must not be zero
+--[[OUTPUT
 --]]
 
 take(5, dup(48)):each(print)
@@ -369,13 +324,13 @@ take(5, dup(1,2,3,4,5)):each(print)
 1,2,3,4,5
 --]]
 
-take(5, tab(2 * _1)):each(print)
+take(5, range():map(2 * _1)):each(print)
 --[[OUTPUT
-0
 2
 4
 6
 8
+10
 --]]
 
 take(5, zeros()):each(print)
@@ -444,7 +399,6 @@ true
 --]]
 
 
---iter.str     = str
 --iter.array   = array
 --iter.resolve = resolve
 
@@ -474,26 +428,26 @@ slice(2, 2, ipairs {"a", "b", "c", "d", "e"}):each(print)
 2,b
 --]]
 
-slice(1, 1, str "abcdef"):each(print)
+slice(1, 1, iter "abcdef"):each(print)
 --[[OUTPUT
-a
+1,a
 --]]
 
-slice(2, 2, str "abcdef"):each(print)
+slice(2, 2, iter "abcdef"):each(print)
 --[[OUTPUT
-b
+2,b
 --]]
 
-slice(6, 6, str "abcdef"):each(print)
+slice(6, 6, iter "abcdef"):each(print)
 --[[OUTPUT
-f
+6,f
 --]]
 
-slice(0, 0, str "abcdef"):each(print)
+slice(0, 0, iter "abcdef"):each(print)
 --[[OUTPUT
 --]]
 
-slice(7, 7, str "abcdef"):each(print)
+slice(7, 7, iter "abcdef"):each(print)
 --[[OUTPUT
 --]]
 
@@ -591,11 +545,23 @@ map(_1*2, range(4)):each(print)
 8
 --]]
 
-interleave({}, dup"x"):each(print)
+interleave(range(3), range(5)):each(print)
+--[[OUTPUT
+1
+1
+2
+2
+3
+3
+4
+5
+--]]
+
+skip_interleave({}, dup"x"):each(print)
 --[[OUTPUT
 --]]
 
-interleave(array{"a", "b", "c", "d", "e"}, dup"x"):each(print)
+skip_interleave(array{"a", "b", "c", "d", "e"}, dup"x"):each(print)
 --[[OUTPUT
 a
 x
@@ -609,7 +575,7 @@ e
 x
 --]]
 
-interleave(array{"a", "b", "c", "d", "e", "f"},dup"x"):each(print)
+skip_interleave(array{"a", "b", "c", "d", "e", "f"},dup"x"):each(print)
 --[[OUTPUT
 a
 x
@@ -625,9 +591,47 @@ f
 x
 --]]
 
+range():take(5):group(2):map(table.unpack):each(print)
+--[[OUTPUT
+1,2
+3,4
+5
+--]]
+
+iter {1,2,2,3,3,4,5} :groupby(_"_2, _2"):map(table.unpack)
+:each(print)
+--[[OUTPUT
+1
+2,2
+3,3
+4
+5
+--]]
+
+array {1,2,2,3,3,4,5} :packgroupby():flatmap(array):map(table.unpack)
+:each(print)
+--[[OUTPUT
+1
+2
+2
+3
+3
+4
+5
+--]]
+
+
 --! compositions
 
 zip(array{"a", "b", "c", "d"}, array{"one", "two", "three"}):each(print)
+--[[OUTPUT
+a,one
+b,two
+c,three
+d,nil
+--]]
+
+zipall(array{"a", "b", "c", "d"}, array{"one", "two", "three"}):each(print)
 --[[OUTPUT
 a,one
 b,two
@@ -785,28 +789,28 @@ take(5, filter(_"_1 % 3 == 0", zip(range(), dup('x')))):each(print)
 --]]
 
 filter(_"_1 % 16 == 0", map(_"_1, _3, _2",
-              zip(range(0, 50, 1),
-                  range(0, 50, 2),
-                  range(0, 50, 3)))):each(print)
+              zipall(range(0, 50, 1),
+                     range(0, 50, 2),
+                     range(0, 50, 3)))):each(print)
 --[[OUTPUT
 0,0,0
 16,48,32
 --]]
 
 lines_to_grep = {
-    "Lorem ipsum dolor sit amet, consectetur adipisicing elit, ",
-    "sed do eiusmod tempor incididunt ut labore et dolore magna ",
-    "aliqua. Ut enim ad minim veniam, quis nostrud exercitation ",
+    "Lorem ipsum dolor sit amet, consectetur adipisicing elit,",
+    "sed do eiusmod tempor incididunt ut labore et dolore magna",
+    "aliqua. Ut enim ad minim veniam, quis nostrud exercitation",
     "ullamco laboris nisi ut aliquip ex ea commodo consequat.",
-    "Duis aute irure dolor in reprehenderit in voluptate velit ",
-    "esse cillum dolore eu fugiat nulla pariatur. Excepteur sint ",
-    "occaecat cupidatat non proident, sunt in culpa qui officia ",
+    "Duis aute irure dolor in reprehenderit in voluptate velit",
+    "esse cillum dolore eu fugiat nulla pariatur. Excepteur sint",
+    "occaecat cupidatat non proident, sunt in culpa qui officia",
     "deserunt mollit anim id est laborum."
 }
 
-filter(_(string.match)(_1, "lab"), array(lines_to_grep)):each(print)
+grep("lab", array(lines_to_grep)):each(print)
 --[[OUTPUT
-sed do eiusmod tempor incididunt ut labore et dolore magna 
+sed do eiusmod tempor incididunt ut labore et dolore magna
 ullamco laboris nisi ut aliquip ex ea commodo consequat.
 deserunt mollit anim id est laborum.
 --]]
@@ -834,7 +838,7 @@ Emma
 
 eq(foldl(_1 + _2, 0, range(5)), 15)
 eq(foldl(op.add, 0, range(5)), 15)
-eq(foldl(_1+_2*_3, 0, zip(range(1, 5), array{4, 3, 2, 1})), 20)
+eq(foldl(_1+_2*_3, 0, zip(range(1, 5), array{4, 3, 2, 1, 0})), 20)
 eq(foldl, reduce)
 
 eq(length{"a", "b", "c", "d", "e"}, 5)
@@ -846,9 +850,9 @@ eq(isempty{"a", "b", "c", "d", "e"}, false)
 eq(isempty{}, true)
 eq(isempty(range(0)), true)
 
-local iter, state, init = range(5)
-eq(isempty(iter, state, init), false)
-wrap(iter, state, init):each(print)
+local it = range(5)
+eq(isempty(it), false)
+iter(it):each(print)
 --[[OUTPUT
 1
 2

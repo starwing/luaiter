@@ -37,7 +37,7 @@ local function newDumper()
       return table_concat(self, nil, 1, n)
    end
    return setmetatable(self, {
-      __call = function(self, ...)
+      __call = function(_, ...)
          local cn = select('#', ...)
          for i = 1, cn do
             b[i] = tostring((select(i, ...)))
@@ -54,15 +54,16 @@ local function gen_test()
    local output, buff
    w "local newDumper, eq = ...; "
    for line in io.lines() do
+      local res
       repeat
-         local res = line:match "%s*%-%-%!%s+([%w_]+)%s*"
+         res = line:match "%s*%-%-%!%s+([%w_]+)%s*"
          if res then
             if buff then w (table_concat(buff)) " end;" end
             w "function test_" (res) "() local print = newDumper()\n"
             buff = {}
             break
          end
-         local res = line:match "^%s*%-%-%[%[OUTPUT%s*$"
+         res = line:match "^%s*%-%-%[%[OUTPUT%s*$"
          if res then
             w "  print:reset(); do "
             w (table_concat(buff)) "  end; eq(print:dump(), [==[\n"
@@ -70,7 +71,7 @@ local function gen_test()
             buff = {}
             break
          end
-         local res = line:match "^%s*%-%-%[%[ERROR%s*$"
+         res = line:match "^%s*%-%-%[%[ERROR%s*$"
          if res then
             w "  eq(print.geterror(function(print) "
             w (table_concat(buff)) "  end), [==[\n"
@@ -78,7 +79,7 @@ local function gen_test()
             buff = {}
             break
          end
-         local res = line:match "^%s*%-%-%]%]%s*$"
+         res = line:match "^%s*%-%-%]%]%s*$"
          if output and res then
             w(table_concat(buff)) "]==])\n"
             output = false
@@ -95,15 +96,15 @@ local function gen_test()
    if buff then w (table_concat(buff)) "end\n" end
    io.input():close()
    local code = w()
-   if false then
+   if 1 < 0 then
       io.output 'test.out.lua'
       io.write(code)
       io.close()
    end
-   return w()
+   return code
 end
 
-assert((loadstring or load)(gen_test(), "@test.impl.lua"))(newDumper, eq)
+assert((_G.loadstring or load)(gen_test(), "@test.impl.lua"))(newDumper, eq)
 
 os.exit(unit.LuaUnit.run(), true)
 

@@ -20,190 +20,218 @@ local pack   = table.pack or
 
 
 -- iterator creation
+-- there are two categories of iterators: statless iterator and
+-- stateful iterator.  In both case, iterator not allowed to change
+-- state.
+--
+-- Stateless iterator should implement "iter" callback that generates
+-- next values only from previous value.  It doesn't has internal
+-- state.  To copy a stateless iterator, just copy it's essential
+-- fields into a new table and makes it as an iterator.
+--
+-- A stateful iterator has its own modifiable internal state, the
+-- "self" table. It still can not change state in iteration, but it
+-- can modify it's "self" table.  A stateful iterator should implement
+-- "next" callback, accept self table, state and current key to
+-- generates next values, by read/write the self table.
+--
+-- Stateful iterator has a "reset" callback that will be called with
+-- one or two arguments.  If only one argument passed, it initlizes
+-- the self table to prepare a new iteration going.  If it's called by
+-- two arguments, "this" and "other", it should copy modifiable
+-- internal state from "other", the same type iterator, and ensure
+-- itself generates the same results as "other".
+--
+-- If iterators has sub iterator, i.e. composition iterator, they are
+-- on iterator's array part, e.g. map() iterator has a sub iterator,
+-- it puts on map iterator subscript 1.
+--
+-- All iterators has several public routines:
+--    - rewind: rewind iterator to generates values from start.
+--    - clone:  clone a iterator
+--    - call directly: generates next values.
+--    - as a iterator: iterates values.
+--
+-- iterators' internal callbacks must not be called directly:
+--    - reset: prepare another iteration.
+--    - next:  disable the "iter" callback and makes iterator stateful.
+--    - iter:  makes iterator stateless.
 
-local Iter = {}
-Iter.__name = "iterator"
+
+local Iter   = {}
+Iter.__name  = "iterator"
 Iter.__index = Iter
 
-local function none_iter() end
-
-function Iter:__call(state, key)
-   return self.iter(state or self.state, key or self.init)
+-- internal callback defaults
+function Iter.iter() end
+function Iter:next(state, key) return self.iter(state, key) end
+function Iter:reset(other)
+   if other then
+      for i, base in ipairs(other) do self[i] = base:clone() end
+   else
+      for _, base in ipairs(self) do base:rewind() end
+   end
+   return self
 end
 
-function Iter:unwrap()
-   return self.iter, self.state, self.init
+local function collect(self, key, ...)
+   self.current = key
+   if self.current == nil then self.stopped = true end
+   return key, ...
+end
+
+function Iter:__call(state, key)
+   if self.stopped then return end
+   state = state or self.state
+   return collect(self, self:next(state, key or self.current or self.init))
+end
+
+function Iter:rewind()
+   if self.stopped then
+      self.stopped, self.current = nil, nil
+      if self.next ~= Iter.next then
+         return self:reset() or self
+      end
+   end
+   return self
+end
+
+function Iter:clone()
+   local new = setmetatable({
+      state   = self.state,
+      init    = self.init,
+      current = self.current
+   }, Iter)
+   if self.next == Iter.next then
+      new.iter = self.iter
+   else
+      new.next  = self.next
+      new.reset = self.reset
+      new = new:reset(self) or new
+   end
+   return new
+end
+
+local function new_stateless(func, state, init)
+   local self = { iter = func, state = state, init = init }
+   if not state then self.state = self end
+   return setmetatable(self, Iter)
+end
+
+local function new_stateful(reset, func, state, init)
+   local self = { reset = reset, next = func, state = state, init = init }
+   if not state then self.state = self end
+   return reset(setmetatable(self, Iter)) or self
 end
 
 local function string_iter(state, key)
-   key = key + 1
+   key = (key or 0) + 1
    local ch = sub(state, key, key)
    if ch == "" then return end
    return key, ch
 end
 
-local function checkiter(iter, state, init)
-   local t = type(iter)
-   if t == "function" then
-      return iter, state, init
-   elseif t == "table" then
-      if getmetatable(iter) == Iter then
-         return iter.iter, iter.state, iter.init
+local function newiter(v, state, init)
+   local t = type(v)
+   if t == "table" then
+      if getmetatable(v) ~= Iter then
+         return new_stateless(pairs(v))
+      elseif v.next == Iter.next and state then
+         return new_stateless(v, state, init)
+      else
+         return v:clone()
       end
-      return pairs(iter)
+   elseif t == "function" then
+      return new_stateless(v, state, init)
    elseif t == "string" then
-      if #iter == 0 then
-         return none_iter
-      end
-      return string_iter, iter, 0
+      return new_stateless(string_iter, v, 0)
+   elseif t == "nil" then
+      return new_stateless(Iter.iter)
    end
    error(format('attempt to iterate a %s value', t))
 end
 
-local function unwrap(iter)
-   return iter, iter.state, iter.init
-end
-
-local function wrap(...)
-   local iter, state, init = checkiter(...)
-   if getmetatable(iter) == Iter then
-      return unwrap(iter)
-   end
-   local self = {
-      iter  = iter,
-      state = state,
-      init  = init,
-   }
-   if state == nil then
-      self.state = self
-      state = self
-   end
-   return setmetatable(self, Iter), state, init
-end
-
-local function wrapiters(self, ...)
-   local n = select('#', ...)
-   if n == 0 then return wrap(none_iter) end
-   if n >= 3 then
-      local last = select(n - 2, ...)
-      if type(last) == 'table' and getmetatable(last) == Iter
-         and last.state == select(n - 1, ...)
-         and last.init == select(n, ...)
-      then
-         n = n - 2
-      end
-   end
-   local c = 0
-   for i = 1, n do
-      c = c + 4
-      self[c-3], self[c-2], self[c-1], self[c] = checkiter((select(i, ...)))
-   end
-   self.c = c
-   return unwrap(self)
-end
-
-iter.iter = wrap
-iter.wrap = wrap
-iter.none = function() return wrap(none_iter) end
+iter.iter = newiter
+iter.none = function() return iter() end
 
 
 -- generators
 
 local function inc_iter(state, key)
-   return key + state[3]
+   return key + state
 end
 
 local function range_iter(state, key)
-   key = key + state[3]
-   if key <= state[2] then return key end
+   key = key + state.step
+   if key <= state.last then return key end
 end
 
-local function range_reviter(state, key)
-   key = key + state[3]
-   if key >= state[2] then return key end
+local function rrange_iter(state, key)
+   key = key + state.step
+   if key >= state.last then return key end
 end
 
 local function range(first, last, step)
    if last == nil and step == nil then
-      if not first or first >= 0 then return range(1, first, 1) end
-      return range(-1, first, -1)
+      if not first or first >= 0 then
+         return range(1, first, 1)
+      else
+         return range(-1, first, -1)
+      end
    end
    step = step or 1
-   assert(step ~= 0, "step must not be zero")
-   local iter = wrap(
-      last == nil and inc_iter or
-      step >= 0 and range_iter or range_reviter)
-   iter.init = first - step
-   iter[1], iter[2], iter[3] = nil, last, step
-   return unwrap(iter)
+   if step == 0 then return newiter() end
+   if last == nil then
+      return new_stateless(inc_iter, step, first - step)
+   end
+   local self = new_stateless(step >= 0 and range_iter or rrange_iter,
+                              nil, first - step)
+   local state = self.state
+   state.first, state.last, state.step = first, last, step
+   return self
 end
 
-local function rand_iter()  return random() end
+local function rand_iter()       return random() end
 local function rand2_iter(state) return random(state.first, state.last) end
 
 local function rand(first, last)
    if not first and not last then
-      return wrap(rand_iter)
+      return new_stateless(rand_iter)
    elseif not last then
       return rand(0, first)
    end
-   local iter = wrap(rand2_iter)
-   iter.first = first
-   iter.last  = last
-   return unwrap(iter)
+   local self = new_stateless(rand2_iter)
+   local state = self.state
+   state.first, state.last = first, last
+   return self
 end
 
-local function tab_iter(state, key)
-   if key == nil then state.i = -1 end
-   local i = state.i + 1
-   state.i = i
-   return state.func(i)
+local function array_reset(self, other)
+   self.index = other and other.index or self.init
 end
 
-local function tab(func)
-   local self = wrap(tab_iter)
-   self.func = assert(func, "expected a function value")
-   return unwrap(self)
-end
-
-local function str_iter(state, key)
-   if key == nil then state.i = 0 end
-   local i = state.i + 1
-   local v = sub(state.s, i, i)
-   state.i = i
-   return v ~= "" and v or nil
-end
-
-local function str(s)
-   local self = wrap(str_iter)
-   self.s = assert(s, "s must be a string")
-   return unwrap(self)
-end
-
-local function array_iter(state, key)
-   if key == nil then state.i = 0 end
-   local i = state.i + 1
-   local v = state.t[i]
-   state.i = i
+local function array_next(self, state)
+   local i = self.index + 1
+   local v = state[i]
+   self.index = i
    return v
 end
 
 local function array(t)
-   local self = wrap(array_iter)
-   self.t = assert(t, "t must be a table")
-   return unwrap(self)
+   assert(t, "table expected")
+   return new_stateful(array_reset, array_next, t, 0)
 end
 
-local function resolve_iter(state, key)
-   if key == nil then return unpack(state) end
-end
+local function resolve1_iter(state, key) if key == nil then return state end end
+local function resolven_iter(state, key) if key == nil then return unpack(state) end end
 
-local function resolve(...)
-   if ... == nil then return wrap(none_iter) end
-   local self = setmetatable(pack(...), Iter)
-   self.iter  = resolve_iter
+local function resolve(v, ...)
+   local n = select('#', ...)
+   if n == 0 then return new_stateless(resolve1_iter, v) end
+   local self = pack(v, ...)
+   self.iter  = resolven_iter
    self.state = self
-   return unwrap(self)
+   return setmetatable(self, Iter)
 end
 
 local function dup1_iter(state) return state end
@@ -211,13 +239,15 @@ local function dupn_iter(state) return unpack(state, 1, state.n) end
 
 local function dup(v, ...)
    local n = select('#', ...)
-   if n == 0 then return wrap(dup1_iter, v) end
-   return wrap(dupn_iter, { n = n + 1, v, ... })
+   if n == 0 then return new_stateless(dup1_iter, v) end
+   local self = pack(v, ...)
+   self.iter  = dupn_iter
+   self.state = self
+   return setmetatable(self, Iter)
 end
+
 iter.range   = range
 iter.rand    = rand
-iter.tab     = tab
-iter.str     = str
 iter.array   = array
 iter.resolve = resolve
 iter.dup     = dup
@@ -227,6 +257,8 @@ iter.ones    = function() return dup(1) end
 
 -- export routines
 
+local function id(...) return ... end
+
 local function alias(f1, f2, ...)
    for i = 1, select('#', ...) do
       local name = select(i, ...)
@@ -235,31 +267,27 @@ local function alias(f1, f2, ...)
    end
 end
 
-local function raw_unwrap(iter)
-   return iter.iter, iter.state, iter.init
-end
-
 local function export0(f, ...)
    alias(function(...)
-      return f(checkiter(...))
+      return f(newiter(...))
    end, function(self)
-      return f(raw_unwrap(self))
+      return f(self:clone())
    end, ...)
 end
 
 local function export1(f, ...)
    alias(function(arg1, ...)
-      return f(arg1, checkiter(...))
+      return f(arg1, newiter(...))
    end, function(self, arg1)
-      return f(arg1, raw_unwrap(self))
+      return f(arg1, self:clone())
    end, ...)
 end
 
 local function export2(f, ...)
    alias(function(arg1, arg2, ...)
-      return f(arg1, arg2, checkiter(...))
+      return f(arg1, arg2, newiter(...))
    end, function(self, arg1, arg2)
-      return f(arg1, arg2, raw_unwrap(self))
+      return f(arg1, arg2, self:clone())
    end, ...)
 end
 
@@ -270,441 +298,437 @@ end
 
 -- slicing
 
-local function calliter(state)
-   return state[1](state[2], state[4] or state[3])
+local function takedrop_reset(self, other)
+   Iter.reset(self, other)
+   self.remain = other and other.remain or self.state
 end
 
-local function iter_collect(state, key, ...)
+local function taken_next(self)
+   local remain = self.remain - 1
+   if remain < 0 then return end
+   self.remain = remain
+   return self[1]()
+end
+
+local function taken(n, base)
+   local self = new_stateful(takedrop_reset, taken_next, n)
+   self[1] = base
+   return self
+end
+
+local function dropn_next(self)
+   local remain = self.remain
+   if remain then
+      self.remain = nil
+      for _ = 1, remain do
+         if self[1]() == nil then
+            return
+         end
+      end
+   end
+   return self[1]()
+end
+
+local function dropn(n, base)
+   local self = new_stateful(takedrop_reset, dropn_next, n)
+   self[1]  = base
+   return self
+end
+
+local function takewhile_collect(state, key, ...)
    if key == nil then return end
-   state[4] = key
+   if not state(key, ...) then return end
    return key, ...
 end
 
-local function take_iter(state, key)
-   if key == state.init then state.i = state.last end
-   local i = state.i - 1
-   if i < 0 then return end
-   state.i = i
-   return state[1](state[2], key)
+local function takewhile_next(self, state)
+   return takewhile_collect(state, self[1]())
 end
 
-local function take(last, ...)
-   local self = wrap(take_iter)
-   self[1], self[2], self[3] = ...
-   self.init = self[3]
-   self.last = last
-   return unwrap(self)
+local function takewhile(func, base)
+   local self = new_stateful(Iter.reset, takewhile_next, func or id)
+   self[1] = base
+   return self
 end
 
-local function drop_iter(state, key)
-   local piter, pstate = state[1], state[2]
-   if key == state.init then
-      for _ = 1, state.first do
-         key = piter(pstate, key)
-         if key == nil then return end
-      end
-   end
-   return piter(pstate, key)
+local function dropwhile(func, base)
+   assert(func, "function expected")
+   func = function(...) return not func(...) end
+   return takewhile(func, base)
 end
 
-local function drop(first, ...)
-   local self = wrap(drop_iter)
-   self[1], self[2], self[3] = ...
-   self.init = self[3]
-   self.first = first
-   return unwrap(self)
-end
+export1(taken,     "taken", "take_n", "takeN")
+export1(dropn,     "dropn", "drop_n", "dropN")
+export1(takewhile, "takewhile", "take_while", "takeWhile")
+export1(dropwhile, "dropwhile", "drop_while", "dropWhile")
 
-local function slice(first, last, ...)
-   if last < first or last <= 0 then return wrap(none_iter) end
+export1(function(p, base)
+   return type(p) == "function" and takewhile(p, base) or taken(p, base)
+end, "take")
+export1(function(p, base)
+   return type(p) == "function" and dropwhile(p, base) or dropn(p, base)
+end, "drop")
+export2(function(first, last, base)
+   if last < first or last <= 0 then return newiter() end
    if first < 1 then first = 1 end
-   local iter = drop(first-1, ...)
-   return take(last - first + 1, raw_unwrap(iter))
-end
-
-export1(take,  "take")
-export1(drop,  "drop")
-export2(slice, "slice")
+   return taken(last - first + 1, dropn(first-1, base))
+end, "slice")
+export2(function(n, base)
+   return taken(n, base), dropn(n, base)
+end, "split", "span", "splitAt", "split_at")
 
 
 -- transforms
 
-local function map_collect(state, key, ...)
-   if key == nil then return end
-   state[4] = key
-   return state.func(key, ...)
+local function map_collect(func, key, ...)
+   if key then return func(key, ...) end
 end
 
-local function map_iter(state, key)
-   if key == nil then state[4] = nil end
-   return map_collect(state, calliter(state))
+local function map_next(self, state)
+   return map_collect(state, self[1]())
 end
 
-local function map(func, ...)
-   local self = wrap(map_iter)
-   self.func = assert(func, "expected a function value")
-   self[1], self[2], self[3] = ...
-   return unwrap(self)
+local function map(func, base)
+   local self = new_stateful(Iter.reset, map_next, func or id)
+   self[1] = base
+   return self
 end
 
-local function flatmap_collect(state, key, ...)
-   if key == nil then
-      local citer, cstate, cinit = map_collect(state, calliter(state))
-      if not citer then return end
-      state[5], state[6], state[7] = citer, cstate, cinit
-      return flatmap_collect(state, citer(cstate, cinit))
+local function flatmap_reset(self, other)
+   Iter.reset(self, other)
+   if not other then self[2] = nil end
+end
+
+local function flatmap_collect_base(self, state, key, ...)
+   if key ~= nil then
+      self[2] = newiter(state(key, ...))
+      return self[2]
    end
-   state[4] = key
-   return key, ...
 end
 
-local function flatmap_iter(state, key)
-   if key == nil then
-      state[4] = nil
-      return flatmap_collect(state)
+local function flatmap_collect(self, state, key, ...)
+   if key ~= nil then return key, ... end
+   if flatmap_collect_base(self, state, self[1]()) then
+      return flatmap_collect(self, state, self[2]())
    end
-   local citer, cstate = state[5], state[6]
-   if not citer then return flatmap_collect(state) end
-   return flatmap_collect(state, citer(cstate, state[4]))
 end
 
-local function flatmap(func, ...)
-   local self = wrap(flatmap_iter)
-   self.func = assert(func, "expected a function value")
-   self[1], self[2], self[3] = ...
-   return unwrap(self)
+local function flatmap_next(self, state)
+   if not self[2] then return flatmap_collect(self, state) end
+   return flatmap_collect(self, state, self[2]())
 end
 
-local function scan_call(state, res, ...)
-   state.curr = res
-   return res, ...
+local function flatmap(func, base)
+   local self = new_stateful(flatmap_reset, flatmap_next, func or id)
+   self[1] = base
+   return self
 end
 
-local function scan_collect(state, key, ...)
+local function scan_collect(self, state, key, ...)
    if key == nil then return end
-   state[4] = key
-   return scan_call(state, state.func(state.curr, key, ...))
+   return state.func(self.current or state.acc, key, ...)
 end
 
-local function scan_iter(state, key)
-   if key == nil then state.curr, state[4] = state.first, nil end
-   return scan_collect(state, calliter(state))
+local function scan_next(self, state)
+   return scan_collect(self, state, self[1]())
 end
 
-local function scan(func, init, ...)
-   local self = wrap(scan_iter)
-   self.func = assert(func, "expected a function value")
-   self.first = init
-   self[1], self[2], self[3] = ...
-   return unwrap(self)
+local function scan(func, init, base)
+   local self = new_stateful(Iter.reset, scan_next)
+   self.state.func = func or id
+   self.state.acc  = init
+   self[1] = base
+   return self
 end
 
-local function group_collect1(state, n, key)
-   local piter, pstate = state[1], state[2]
-   local args = state.args
-   local cn = state.c-state.i
-   args[n] = key
-   for i = 1, cn do
-      key = piter(pstate, key)
-      if key == nil then
-         state.i = nil
-         return unpack(args, 1, n+i-1)
+local function group_reset(self, other)
+   Iter.reset(self, other)
+   if other then
+      if other.collects then
+         local collects = {}
+         for k, v in pairs(other.collects) do
+            collects[k] = v
+         end
+         self.collects = collects
+      else
+         self.collects = nil
       end
-      args[n+i] = key
+      self.remain   = other.remain
+   else
+      self.collects = { n = 0 }
+      self.remain   = self.state
    end
-   state.i, state[4] = 1, key
-   return unpack(args, 1, n+cn)
 end
 
-local function group_collect(state, n, key, ...)
+local function group_collect(self, state, key, ...)
+   local collects = self.collects
    if key == nil then
-      state.i = nil
-      return unpack(state.args, 1, n-1)
+      if collects.n == 0 then return end
+      self.collects = nil
+      return collects
    end
-   local cn = select('#', ...)
-   if cn == 0 then return group_collect1(state, n, key) end
-   local args = state.args
-   args[n] = key
-   for i = 1, cn do
-      args[n+i] = select(i, ...)
+   local remain = self.remain
+   remain = remain - 1
+   local n, c = collects.n, select('#', ...)
+   collects[n+1] = key
+   for i = 1, c do
+      collects[n+i+1] = select(i, ...)
    end
-   if state.i < state.c then
-      state.i = state.i + 1
-      return group_collect(state, n+cn+1, calliter(state))
+   collects.n = n + c + 1
+   if remain <= 0 then
+      self.remain   = state
+      self.collects = { n = 0 }
+      return collects
    end
-   state.i, state[4] = 1, key
-   return unpack(args, 1, n+cn)
+   self.remain = remain
+   return group_collect(self, state, self[1]())
 end
 
-local function group_iter(state, key)
-   if key == nil then state.i, state[4] = 1, nil end
-   if not state.i then return end
-   return group_collect(state, 1, calliter(state))
+local function group_next(self, state)
+   if not self.collects then return end
+   return group_collect(self, state, self[1]())
 end
 
-local function group(n, ...)
-   if n < 1 then return wrap(none_iter) end
-   local self = wrap(group_iter)
-   self.args = {}
-   self.c = n
-   self[1], self[2], self[3] = ...
-   return unwrap(self)
+local function group(n, base)
+   local self = new_stateful(group_reset, group_next, n)
+   self[1] = base
+   return self
 end
 
-local function groupby_collect(state, n, key, ...)
+local function groupby_reset(self, other)
+   Iter.reset(self, other)
+   if other then
+      self.collects = other.collects and Iter.reset({}, other.collects) or nil
+      self.dopack   = other.dopack
+   else
+      self.collects = {}
+   end
+end
+
+local function groupby_collect(self, state, key, ...)
+   local collects = self.collects
    if key == nil then
-      state.stop = true
-      return unpack(state.args, 1, n-1)
+      self.collects = nil
+      return collects
    end
-   local old = state.group
-   state.group = state.func(key, ...)
-   state[4] = key
-   local cn = select('#', ...)
-   if n == 1 or state.group == old then
-      local args = state.args
-      args[n] = key
-      for i = 1, cn do args[n+i] = select(i, ...) end
-      return groupby_collect(state, n+cn+1, calliter(state))
+   local oldkey = collects.key
+   local newkey = state(key, ...)
+   if oldkey ~= nil and oldkey ~= newkey then
+      self.collects = self.dopack and { pack(key, ...) } or { (...) }
+      self.collects.key = newkey
+      return collects
    end
-   local args, cached = state.cached, state.args
-   args[1] = key
-   for i = 1, cn do args[i+1] = select(i, ...) end
-   state.i = cn + 2
-   state.args, state.cached = args, cached
-   return unpack(cached, 1, n-1)
+   collects.key = newkey
+   collects[#collects+1] = self.dopack and pack(key, ...) or (...)
+   return groupby_collect(self, state, self[1]())
 end
 
-local function groupby_iter(state, key)
-   if key == nil then state.i, state.stop, state[4] = 1, false, nil end
-   if state.stop then return end
-   return groupby_collect(state, state.i, calliter(state))
+local function groupby_next(self, state)
+   if not self.collects then return end
+   return groupby_collect(self, state, self[1]())
 end
 
-local function groupby(func, ...)
-   local self = wrap(groupby_iter)
-   self.func = assert(func, "expected a function value")
-   self.args   = {}
-   self.cached = {}
-   self[1], self[2], self[3] = ...
-   return unwrap(self)
+local function groupby(func, base)
+   local self = new_stateful(groupby_reset, groupby_next, func or id)
+   self[1] = base
+   return self
 end
 
 export1(map,     "map")
 export1(flatmap, "flatmap", "flat_map", "flatMap")
 export2(scan,    "scan", "accumulate", "reductions")
-export1(group,   "group")
-export1(groupby, "groupby", "group_by", "groupBy")
+export1(group,       "group")
+export1(groupby,     "groupby", "group_by", "groupBy")
+export1(function(func, base)
+   local self = groupby(func, base)
+   self.dopack = true
+   return self
+end, "packgroupby", "pack_group_by", "packGroupBy")
 
 
 -- compositions
 
-local function zip_collect(state, c, key, ...)
-   if key == nil then return end
-   state[c+3] = key
-   local args, n = state.args, state.n
-   args[n] = key
-   local cn = select('#', ...)
-   for i = 1, cn do
-      args[n+i] = select(i, ...)
+local function collectiters(self, ...)
+   local n = select('#', ...)
+   if n == 0 then return newiter() end
+   for i = 1, n do
+      self[#self+1] = newiter((select(i, ...)))
    end
-   state.n = n + cn + 1
-   c = c + 4
-   if c > state.c then
-      return unpack(args, 1, state.n-1)
-   end
-   local citer, cstate, ckey = state[c], state[c+1], state[c+3] or state[c+2]
-   return zip_collect(state, c, citer(cstate, ckey))
+   return self
 end
 
-local function zip_iter(state, key)
-   if key == nil then
-      for i = 1, state.c, 4 do
-         state[i+3] = nil
-      end
-   end
-   local citer, cstate, ckey = state[1], state[2], state[4] or state[3]
-   state.n = 1
-   return zip_collect(state, 1, citer(cstate, ckey))
+local function interleave_reset(self, other)
+   Iter.reset(self, other)
+   self.idx = other and other.idx or 1
 end
 
-local function zip(...)
-   local self = wrap(zip_iter)
-   self.args = {}
-   return wrapiters(self, ...)
+local function interleave_collect(self, state, key, ...)
+   if self.retry <= 0 then self.retry = nil; return end
+   local idx = self.idx + 1
+   idx = self[idx] and idx or 1
+   self.idx = idx
+   if key ~= nil or state.notskip then return key, ... end
+   self.retry = self.retry - 1
+   return interleave_collect(self, state, self[idx]())
 end
 
-function Iter:prefix(...)
-   local iter = wrap(zip_iter)
-   iter.args = {}
-   wrapiters(iter, ...)
-   local c = iter.c + 1
-   iter[c], iter[c+1], iter[c+2] = raw_unwrap(self)
-   iter.c = c + 3
-   return iter
-end
-
-local function interleave_collect(state, key, ...)
-   if key == nil then return end
-   local i = state.i + 4
-   state.i = i > state.c and 1 or i
-   state[i-1] = key
-   return key, ...
-end
-
-local function interleave_iter(state, key)
-   if key == nil then
-      state.i = 1
-      for i = 1, state.c, 4 do
-         state[i+3] = nil
-      end
-   end
-   local c = state.i
-   local citer, cstate, ckey = state[c], state[c+1], state[c+3] or state[c+2]
-   return interleave_collect(state, citer(cstate, ckey))
+local function interleave_next(self, state)
+   self.retry = #self
+   return interleave_collect(self, state, self[self.idx]())
 end
 
 local function interleave(...)
-   return wrapiters(wrap(interleave_iter), ...)
+   return collectiters(new_stateful(interleave_reset, interleave_next), ...)
 end
 
-local function chain_collect(state, c, key, ...)
-   if key == nil then
-      c = c + 4
-      state.i = c
-      if c > state.c then return end
-      local citer, cstate, cinit = state[c], state[c+1], state[c+2]
-      return chain_collect(state, c, citer(cstate, cinit))
-   end
-   state[c+3] = key
-   return key, ...
+local function zip_reset(self, other)
+   Iter.reset(self, other)
+   self.collects = { n = 0 }
 end
 
-local function chain_iter(state, key)
-   if key == nil then
-      state.i = 1
-      for i = 1, state.c, 4 do
-         state[i+3] = nil
+local function zip_collect(self, state, c, key, ...)
+   local collects = self.collects
+   local n = collects.n + 1
+   collects[n] = key
+   if c == #self then
+      local cn = select('#', ...)
+      for i = 1, cn do
+         collects[n+i] = select(i, ...)
       end
+      n = n + cn
    end
-   local c = state.i
-   local citer, cstate, ckey = state[c], state[c+1], state[c+3] or state[c+2]
-   return chain_collect(state, c, citer(cstate, ckey))
+   collects.n = n
+   c = c + 1
+   if not self[c] then
+      if collects[1] == nil then return end
+      if state.notskip then
+         for i = 2, n do
+            if collects[i] == nil then return end
+         end
+      end
+      return unpack(collects, 1, n)
+   end
+   return zip_collect(self, state, c, self[c]())
+end
+
+local function zip_next(self, state)
+   self.collects.n = 0
+   return zip_collect(self, state, 1, self[1]())
+end
+
+local function zip(...)
+   return collectiters(new_stateful(zip_reset, zip_next), ...)
+end
+
+local function chain_reset(self, other)
+   Iter.reset(self, other)
+   self.idx = other and other.idx or 1
+end
+
+local function chain_collect(self, key, ...)
+   if key ~= nil then return key, ... end
+   local idx = self.idx + 1
+   local base = self[idx]
+   if not base then return end
+   self.idx = idx
+   return chain_collect(self, base())
+end
+
+local function chain_next(self)
+   local base = self[self.idx]
+   if not base then return end
+   return chain_collect(self, base())
 end
 
 local function chain(...)
-   return wrapiters(wrap(chain_iter), ...)
+   return collectiters(new_stateful(chain_reset, chain_next), ...)
 end
 
-local function cycle_collect(state, key, ...)
-   state[4] = key
-   if key == nil then
-      return cycle_collect(state, calliter(state))
+local function cycle_collect(self, retry, key, ...)
+   if key ~= nil then return key, ... end
+   if retry then
+      self[1]:rewind()
+      return cycle_collect(self, false, self[1]())
    end
-   return key, ...
 end
 
-local function cycle_iter(state, key)
-   if key == nil then
-      state[4] = nil
-      return iter_collect(state, calliter(state))
-   end
-   return cycle_collect(state, calliter(state))
+local function cycle_next(self)
+   return cycle_collect(self, true, self[1]())
 end
 
-local function cycle(...)
-   local self = wrap(cycle_iter)
-   self[1], self[2], self[3] = ...
-   return unwrap(self)
+local function cycle(base)
+   local self = new_stateful(Iter.reset, cycle_next)
+   self[1] = base
+   return self
 end
 
-exportn(zip,        "zip")
+function Iter:prefix(...)
+   local super = zip(...)
+   super[#super+1] = self:clone()
+   return super
+end
+
 exportn(interleave, "interleave")
+exportn(zip,        "zip", "zipany", "zipAny", "zip_any")
 exportn(chain,      "chain")
 export0(cycle,      "cycle")
+
+exportn(function(...)
+   local self = interleave(...)
+   self.notskip = true
+   return self
+end, "skipinterleave", "skip_interleave", "skipInterleave")
+exportn(function(...)
+   local self = zip(...)
+   self.notskip = true
+   return self
+end, "zipall", "zipAll", "zip_all")
 
 
 -- filtering
 
-local function takewhile_collect(func, key, ...)
+local function filter_collect(self, state, key, ...)
    if key == nil then return end
-   if func(key, ...) then return key, ...  end
+   if state(key, ...) then return key, ...  end
+   return filter_collect(self, state, self[1]())
 end
 
-local function takewhile_iter(state, key)
-   local func, piter, pstate = state.func, state[1], state[2]
-   return takewhile_collect(func, piter(pstate, key))
+local function filter_next(self, state)
+   return filter_collect(self, state, self[1]())
 end
 
-local function takewhile(func, iter, state, init)
-   local self = wrap(takewhile_iter, nil, init)
-   self.func = assert(func, "expected a function value")
-   self[1], self[2], self[3] = iter, state, init
-   return wrap(self)
+local function filter(func, base)
+   assert(func, "function expected")
+   local self = new_stateful(Iter.reset, filter_next, func)
+   self[1] = base
+   return self
 end
 
-local function dropwhile(func, iter, state, init)
-   local self = wrap(takewhile_iter, nil, init)
-   assert(func, "expected a function value")
-   self.func = function(...) return not func(...) end
-   self[1], self[2], self[3] = iter, state, init
-   return unwrap(self)
+local function filterout(func, base)
+   assert(func, "function expected")
+   return filter(function(...) return not func(...) end, base)
 end
 
-local function filter_collect(func, iter, state, key, ...)
-   if select('#', ...) == 0 then
-      while key ~= nil do
-         if func(key) then return key end
-         key = iter(state, key)
-      end
-   end
-   if key == nil then return end
-   if func(key, ...) then return key, ...  end
-   return filter_collect(func, iter, state, iter(state, key))
-end
-
-local function filter_iter(state, key)
-   local func, piter, pstate = state.func, state[1], state[2]
-   return filter_collect(func, piter, pstate, piter(pstate, key))
-end
-
-local function filter(func, iter, state, init)
-   local self = wrap(filter_iter, nil, init)
-   self.func = assert(func, "expected a function value")
-   self[1], self[2], self[3] = iter, state, init
-   return unwrap(self)
-end
-
-local function filterout(func, iter, state, init)
-   assert(func, "expected a function value")
-   local self = wrap(filter_iter, nil, init)
-   self.func = function(...) return not func(...) end
-   self[1], self[2], self[3] = iter, state, init
-   return unwrap(self)
-end
-
-export1(takewhile, "takewhile", "take_while", "takeWhile")
-export1(dropwhile, "dropwhile", "drop_while", "dropWhile")
 export1(filter,    "filter", "removeifnot", "remove_if_not", "removeIfNot")
 export1(filterout, "filterout", "filter_out", "filterOut",
                    "removeif", "remove_if", "removeIf")
+
+export1(function(func, base)
+   return filter(func, base), filterout(func, base)
+end, "partition")
+export1(function(patt, base)
+   return filter(function(v) return v:match(patt) end, base)
+end, "grep")
 
 
 -- reducing
 
 local function each_collect(func, key, ...)
-   if key == nil then return end
-   return func(key, ...) or key
+   if key ~= nil then func(key, ...); return true end
 end
 
-local function each(func, iter, state, key)
-   repeat
-      key = each_collect(func, iter(state, key))
-   until key == nil
-end
-
-local function foldl_detect(func, init, key, ...)
-   if key == nil then return nil, init end
-   return select('#', ...), key, func(init, key, ...)
+local function each(func, base)
+   while each_collect(func, base()) do end
 end
 
 local function foldl_collect(func, init, key, ...)
@@ -712,79 +736,58 @@ local function foldl_collect(func, init, key, ...)
    return key, func(init, key, ...)
 end
 
-local function foldl(func, init, iter, state, key)
+local function foldl(func, init, base)
+   assert(func, "function expected")
    if init == nil then
-      key = iter(state, key)
-      if key == nil then return end
+      local key = base()
+      if key == nil then return init end
       init = key
    end
-   assert(func, "expected a function value")
-   local n
-   n, key, init = foldl_detect(func, init, iter(state, key))
-   if key == nil then return init end
-   if n == 0 then
-      for v in iter, state, init do
-         init = func(init, v)
-      end
-   else
-      while true do
-         key, init = foldl_collect(func, init, iter(state, key))
-         if key == nil then break end
-      end
-   end
-   return init
-end
-
-local function index_collect(func, iter, state, i, key, ...)
-   if key == nil then return end
-   if func(key, ...) then
-      return i + 1, key, ...
-   end
-   return index_collect(func, iter, state, i + 1, iter(state, key))
-end
-
-local function index(func, iter, state, key)
-   assert(func, "expected a function value")
-   return index_collect(func, iter, state, 0, iter(state, key))
-end
-
-local function collect_collect(t, n, key, ...)
-   if key == nil then return nil, n-1 end
-   local cn = select('#', ...)
-   t[n] = key
-   for i = 1, cn do
-      t[n + i] = select(i, ...)
-   end
-   return key, n + cn + 1
-end
-
-local function collect(t, iter, state, key)
-   t = t or {}
-   local n = #t + 1
+   local key
    while true do
-      key, n = collect_collect(t, n, iter(state, key))
-      if key == nil then return t, n end
+      key, init = foldl_collect(func, init, base()) 
+      if key == nil then return init end
    end
 end
 
-local function concat(delim, iter, state, key)
-   local t = {}
-   local n = 0
-   for v in iter, state, key do
-      n = n + 1
-      t[n] = v
-   end
+local function index_collect(func, base, i, key, ...)
+   if key == nil then return end
+   if func(key, ...) then return i + 1, key, ...  end
+   return index_collect(func, base, i + 1, base())
+end
+
+local function index(func, base)
+   return index_collect(func or id, base(), 0, base())
+end
+
+local function tcollect_collect(t, key, ...)
+   if key == nil then return end
+   local cn = select('#', ...)
+   t[#t+1] = key
+   for i = 1, cn do t[#t+1] = select(i, ...) end
+   return true
+end
+
+local function tcollect(t, base)
+   t = t or {}
+   while tcollect_collect(t, base()) do end
+   return t
+end
+
+local function concat(delim, base)
+   local t, n = {}, 0
+   for v in base do n = n + 1; t[n] = v end
    return tabcat(t, delim, 1, n)
 end
 
-local function count(iter, state, key)
+local function count(base)
    local n = 0
-   for _ in iter, state, key do n = n + 1 end
+   while base() do n = n + 1 end
    return n
 end
 
-local function isempty(iter, state, key)
-   return iter(state, key) == nil
+local function isempty(base)
+   return base() == nil
 end
 
 local function predicate_collect(func, key, ...)
@@ -792,35 +795,33 @@ local function predicate_collect(func, key, ...)
    return func(key, ...), key
 end
 
-local function any(func, iter, state, key)
-   assert(func, "expected a function value")
-   local r
+local function any(func, base)
+   func = func or id
    while true do
-      r, key = predicate_collect(func, iter(state, key))
+      local r, key = predicate_collect(func, base())
       if key == nil then return false end
       if r          then return true end
    end
 end
 
-local function all(func, iter, state, key)
-   assert(func, "expected a function value")
-   local r
+local function all(func, base)
+   func = func or id
    while true do
-      r, key = predicate_collect(func, iter(state, key))
+      local r, key = predicate_collect(func, base())
       if key == nil then return true end
       if not r      then return false end
    end
 end
 
-export1(each,    "each", "foreach", "for_each", "forEach")
-export2(foldl,   "reduce", "foldl")
-export1(index,   "index")
-export1(collect, "collect")
-export1(concat,  "concat")
-export0(count,   "count", "length")
-export0(isempty, "isempty", "is_empty", "isEmpty")
-export1(all,     "all", "every")
-export1(any,     "any", "some")
+export1(each,     "each", "foreach", "for_each", "forEach")
+export2(foldl,    "reduce", "foldl")
+export1(index,    "index", "find", "indexof", "indexOf", "index_of")
+export1(tcollect, "collect")
+export1(concat,   "concat")
+export0(count,    "count", "length")
+export0(isempty,  "isempty", "is_empty", "isEmpty")
+export1(all,      "all", "every")
+export1(any,      "any", "some")
 
 
 -- operators
@@ -974,7 +975,7 @@ iter._ = setmetatable(selectors, {
 end
 
 local Operator = {
-   id = function(...) return ... end;
+   id = id,
 
    -- Comparison operators
    eq = function(a, b) return a == b end;
@@ -1048,12 +1049,12 @@ iter.operator = Operator
 -- export
 
 return setmetatable(iter, {
-   __call = function(iter, t)
+   __call = function(self, t)
       t = t or _G
-      for k, v in pairs(iter) do
+      for k, v in pairs(self) do
          t[k] = v
       end
-      return iter
+      return self
    end
 })
 
