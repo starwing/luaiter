@@ -138,6 +138,7 @@ Slicing:
   - `slice(first, last, iter)`
 
 Transforms:
+  - `enumerate(iter)`
   - `map(func, iter)`
   - `flatmap(func, iter)`
   - `scan(func, init, iter)`

@@ -146,6 +146,8 @@ local function newiter(v, state, init)
    elseif t == "nil" then
       return new_stateless(nil_iter)
    end
+   local mt = getmetatable(v)
+   if mt and mt.__pairs then return new_stateful(pairs(v)) end
    error(format('attempt to iterate a %s value', t))
 end
 
@@ -391,6 +393,28 @@ end, "split", "span", "splitAt", "split_at")
 
 -- transforms
 
+local function enum_reset(self, other)
+   Iter.reset(self, other)
+   self.idx = other and other.idx or 0
+   return self
+end
+
+local function enum_collect(self, key, ...)
+   if not key then return end
+   self.idx = self.idx + 1
+   return self.idx, key, ...
+end
+
+local function enum_next(self)
+   return enum_collect(self, self[1]())
+end
+
+local function enumerate(base)
+   local self = new_stateful(enum_reset, enum_next)
+   self[1] = base
+   return self
+end
+
 local function map_collect(func, key, ...)
    if key ~= nil then return func(key, ...) end
 end
@@ -551,9 +575,10 @@ local function groupby(func, base)
    return self
 end
 
-export1(map,     "map")
-export1(flatmap, "flatmap", "flat_map", "flatMap")
-export2(scan,    "scan", "accumulate", "reductions")
+export0(enumerate,   "enumerate")
+export1(map,         "map")
+export1(flatmap,     "flatmap", "flat_map", "flatMap")
+export2(scan,        "scan", "accumulate", "reductions")
 export1(group,       "group")
 export1(groupby,     "groupby", "group_by", "groupBy")
 export1(function(func, base)
